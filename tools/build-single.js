@@ -1,0 +1,18 @@
+// Bundles the app into one self-contained HTML file (dist/color-fun.html).
+// Usage: node tools/build-single.js
+const fs = require('fs'), path = require('path');
+const root = path.join(__dirname, '..');
+const read = f => fs.readFileSync(path.join(root, f), 'utf8');
+const packs = ['animals', 'ocean', 'vehicles', 'space', 'fantasy', 'halloween'];
+let js = packs.map(p => read(`art/${p}.js`).replace(/export\s+default/, `const pack_${p} =`)).join('\n');
+js += '\n' + read('art/index.js').replace(/^import .*$/gm, '').replace(/import (\w+) from '\.\/(\w+)\.js';/g, '')
+  .replace(/export\s+default/, 'const PACKS =');
+js = js.replace(/const PACKS = \[([^\]]*)\]/, (m, list) => `const PACKS = [${list.split(',').map(s => s.trim()).map(s => packs.includes(s) ? `pack_${s}` : s).join(', ')}]`);
+js += '\n' + read('app.js').replace(/^import .*$/m, '');
+let html = read('index.html')
+  .replace('<link rel="stylesheet" href="style.css">', `<style>\n${read('style.css')}\n</style>`)
+  .replace('<script type="module" src="app.js"></script>', `<script type="module">\n${js}\n</script>`)
+  .replace(/<link rel="(apple-touch-icon|manifest)"[^>]*>\n/g, '');
+fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
+fs.writeFileSync(path.join(root, 'dist/color-fun.html'), html);
+console.log('wrote dist/color-fun.html', (html.length / 1024).toFixed(0), 'KB');

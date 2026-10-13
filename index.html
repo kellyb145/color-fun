@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Color Fun">
+<meta name="theme-color" content="#7c4dff">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<title>Color Fun</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="home" class="screen active">
+  <h1 class="logo">🖍️ Color Fun</h1>
+  <div id="packGrid" class="tile-grid"></div>
+</section>
+
+<section id="pack" class="screen">
+  <div class="topbar">
+    <button class="round yellow" data-go="home" aria-label="Back">⬅</button>
+    <h2 id="packTitle"></h2>
+  </div>
+  <div id="picGrid" class="tile-grid pics"></div>
+</section>
+
+<section id="draw" class="screen">
+  <div class="bar actions">
+    <button class="round yellow" id="backBtn" aria-label="Back">⬅</button>
+    <button class="round" id="undoBtn" aria-label="Undo">↩️</button>
+    <button class="round" id="linesBtn" aria-label="Stay in the lines">🧱</button>
+    <button class="round hold" id="saveBtn" aria-label="Save picture (hold)">📷<span class="ring"></span></button>
+    <button class="round purple" id="trashBtn" aria-label="Start over">🗑️</button>
+  </div>
+  <div class="stage" id="stage">
+    <div id="board">
+      <canvas id="paint"></canvas>
+      <canvas id="lines"></canvas>
+      <canvas id="fx"></canvas>
+    </div>
+  </div>
+  <div class="bar tools" id="tools"></div>
+  <div class="bar colors" id="colors"></div>
+</section>
+
+<div id="confirm" class="overlay">
+  <div class="dialog">
+    <div class="dialog-pic">🗑️</div>
+    <div class="dialog-btns">
+      <button class="big no" id="confirmNo" aria-label="No">✖</button>
+      <button class="big yes" id="confirmYes" aria-label="Yes">✔</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
