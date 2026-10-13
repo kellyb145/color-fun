@@ -13,6 +13,7 @@ html, body {
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
   overscroll-behavior: none;
 }
+[hidden] { display: none !important; }
 button { font: inherit; border: 0; cursor: pointer; touch-action: manipulation; }
 
 .screen {
@@ -134,3 +135,34 @@ button { font: inherit; border: 0; cursor: pointer; touch-action: manipulation; 
 .big { width: 110px; height: 110px; border-radius: 50%; font-size: 56px; color: #fff; box-shadow: var(--shadow); }
 .big.yes { background: #43a047; }
 .big.no { background: #e53935; }
+
+/* mode picker on the home screen */
+.modes { display: flex; justify-content: center; gap: 14px; margin: 0 0 18px; flex-wrap: wrap; }
+.mode {
+  display: flex; align-items: center; gap: 8px; padding: 10px 22px 10px 14px; border-radius: 999px;
+  background: #fff; box-shadow: var(--shadow); font-weight: 800; font-size: 22px; color: #555;
+}
+.mode .emoji { font-size: 34px; }
+.mode.sel { background: var(--accent); color: #fff; }
+.pack-mode { font-size: clamp(26px, 5vw, 42px); margin-left: auto; }
+
+/* numbered swatches for color by number */
+.colors.numbered { grid-template-columns: repeat(2, 64px); }
+.colors.numbered .swatch { width: 64px; height: 64px; display: grid; place-items: center; }
+.swatch b {
+  font-size: 26px; color: #fff; font-weight: 900;
+  text-shadow: 0 0 3px rgba(0,0,0,.6), 0 1px 2px rgba(0,0,0,.5);
+}
+.swatch.nope { animation: nope .35s; }
+@keyframes nope { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+@media (orientation: portrait) {
+  .colors.numbered { grid-template-columns: repeat(var(--n), minmax(0, 64px)); justify-content: center; }
+  .colors.numbered .swatch { width: min(64px, 12vw); height: min(64px, 12vw); }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .colors.numbered { grid-template-columns: repeat(2, 44px); }
+  .colors.numbered .swatch { width: 44px; height: 44px; }
+  .swatch b { font-size: 20px; }
+  .mode { font-size: 18px; padding: 6px 16px 6px 10px; } .mode .emoji { font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) { .swatch.nope { animation: none; } }

@@ -8,7 +8,9 @@ let js = packs.map(p => read(`art/${p}.js`).replace(/export\s+default/, `const p
 js += '\n' + read('art/index.js').replace(/^import .*$/gm, '').replace(/import (\w+) from '\.\/(\w+)\.js';/g, '')
   .replace(/export\s+default/, 'const PACKS =');
 js = js.replace(/const PACKS = \[([^\]]*)\]/, (m, list) => `const PACKS = [${list.split(',').map(s => s.trim()).map(s => packs.includes(s) ? `pack_${s}` : s).join(', ')}]`);
-js += '\n' + read('app.js').replace(/^import .*$/m, '');
+js += '\n' + packs.map(p => read(`art/extras/${p}.js`).replace(/export\s+default/, `const extras_${p} =`)).join('\n');
+js += `\nconst EXTRAS = Object.assign({}, ${packs.map(p => `extras_${p}`).join(', ')});`;
+js += '\n' + read('app.js').replace(/^import .*$/gm, '');
 let html = read('index.html')
   .replace('<link rel="stylesheet" href="style.css">', `<style>\n${read('style.css')}\n</style>`)
   .replace('<script type="module" src="app.js"></script>', `<script type="module">\n${js}\n</script>`)

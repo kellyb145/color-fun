@@ -1,4 +1,5 @@
 import PACKS from './art/index.js';
+import EXTRAS from './art/extras/index.js';
 
 // ---------- constants ----------
 const SIZE = 1536;               // internal canvas resolution (square)
@@ -84,9 +85,42 @@ function inSeason(pack) {
   return from <= to ? (md >= from && md <= to) : (md >= from || md <= to);
 }
 
+// ---------- modes ----------
+const MODES = [
+  { id: 'color', icon: '🎨', title: 'Color' },
+  { id: 'number', icon: '🔢', title: 'Numbers' },
+  { id: 'dots', icon: '⭐', title: 'Dots' },
+];
+let mode = 'color';
+try { mode = localStorage.getItem('colorfun-mode') || 'color'; } catch (e) {}
+if (!MODES.some(m => m.id === mode)) mode = 'color';
+
+// Pictures a mode can use: numbers needs color hints or regions, dots needs a dot path.
+function picturesFor(pack) {
+  if (mode === 'color') return pack.pictures;
+  if (pack.id === 'draw') return [];
+  if (mode === 'dots') return pack.pictures.filter(p => EXTRAS[p.id] && EXTRAS[p.id].dots && EXTRAS[p.id].dots.length > 2);
+  return pack.pictures;
+}
+const saveKey = id => mode === 'color' ? id : `${mode}:${id}`;
+
+function renderModes() {
+  const bar = $('#modes'); bar.innerHTML = '';
+  for (const m of MODES) {
+    const b = el('button', 'mode' + (m.id === mode ? ' sel' : ''), `<span class="emoji">${m.icon}</span><span>${m.title}</span>`);
+    b.onclick = () => {
+      mode = m.id;
+      try { localStorage.setItem('colorfun-mode', mode); } catch (e) {}
+      pop(620); renderHome();
+    };
+    bar.append(b);
+  }
+}
+
 function renderHome() {
+  renderModes();
   const grid = $('#packGrid'); grid.innerHTML = '';
-  const packs = [...PACKS].sort((a, b) => inSeason(b) - inSeason(a));
+  const packs = [...PACKS].sort((a, b) => inSeason(b) - inSeason(a)).filter(p => picturesFor(p).length);
   for (const pack of packs) {
     const t = el('button', 'tile' + (inSeason(pack) ? ' season' : ''));
     t.append(el('div', 'emoji', pack.icon), el('div', '', pack.title));
@@ -99,14 +133,16 @@ let currentPack;
 async function openPack(pack) {
   currentPack = pack;
   $('#packTitle').textContent = `${pack.icon} ${pack.title}`;
+  const m = MODES.find(x => x.id === mode);
+  $('#packMode').textContent = mode === 'color' ? '' : m.icon;
   const grid = $('#picGrid'); grid.innerHTML = '';
-  for (const pic of pack.pictures) {
+  for (const pic of picturesFor(pack)) {
     const t = el('button', 'tile');
     const th = el('div', 'thumb', pic.svg);
     t.append(th);
     t.onclick = () => openPicture(pic);
     grid.append(t);
-    db.get('thumbs', pic.id).then(url => { if (url) th.innerHTML = `<img src="${url}" alt="">`; });
+    db.get('thumbs', saveKey(pic.id)).then(url => { if (url) th.innerHTML = `<img src="${url}" alt="">`; });
   }
   show('pack');
 }
@@ -250,10 +286,10 @@ function sparkles(ctx, x, y, w, h, n) {
 
 // ---------- fill ----------
 let finishFill = null;   // completes a running fill animation immediately
-function fillAt(x, y) {
+function fillAt(x, y, regionId) {
   if (finishFill) finishFill();
-  const id = regionAt(x, y);
-  if (!id) return;
+  const id = regionId || regionAt(x, y);
+  if (!id) return 0;
   const m = regionMask(id);
   pushUndo(m.x, m.y, m.w, m.h);
   const layer = canvas(m.w, m.h), c = layer.getContext('2d');
@@ -282,6 +318,7 @@ function fillAt(x, y) {
     requestAnimationFrame(step);
   };
   requestAnimationFrame(step);
+  return id;
 }
 
 // ---------- brushes ----------
@@ -395,17 +432,21 @@ board.addEventListener('pointerdown', e => {
   if (stroke.active || !state.labels) return;   // ignore a second finger / palm
   e.preventDefault();
   const p = toCanvas(e);
+  if (game.kind === 'number') { numberTap(p); return; }
+  if (game.kind === 'dots') { dotsDown(p, e.pointerId); return; }
   if (state.tool === 'fill') { fillAt(p.x, p.y); return; }
   if (finishFill) finishFill();
   board.setPointerCapture(e.pointerId);
   beginStroke(p.x, p.y, e.pointerId);
 });
 board.addEventListener('pointermove', e => {
+  if (game.kind === 'dots') { if (e.pointerId === game.pointer) dotsMove(toCanvas(e)); return; }
   if (!stroke.active || e.pointerId !== stroke.pointer) return;
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
   for (const ev of (events.length ? events : [e])) { const p = toCanvas(ev); strokeTo(p.x, p.y); }
 });
 ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => board.addEventListener(t, e => {
+  if (e.pointerId === game.pointer) { game.pointer = null; game.trail = null; }
   if (e.pointerId === stroke.pointer) endStroke();
 }));
 document.addEventListener('gesturestart', e => e.preventDefault());
@@ -428,27 +469,47 @@ function buildToolbar() {
   });
   tools.append(sizes);
 
-  const colors = $('#colors');
-  for (const c of COLORS) {
-    const b = el('button', 'swatch' + (c === 'rainbow' ? ' rainbow' : '') + (c === '#ffffff' ? ' white' : ''));
-    if (c !== 'rainbow') b.style.background = c;
-    b.dataset.color = c; b.setAttribute('aria-label', c);
-    b.onclick = () => { state.color = c; if (state.tool === 'eraser') state.tool = 'marker'; refreshToolbar(); pop(600); };
-    colors.append(b);
-  }
+  buildPalette(COLORS);
   $('#undoBtn').onclick = undo;
   $('#linesBtn').onclick = () => { state.stayInLines = !state.stayInLines; refreshToolbar(); };
-  $('#backBtn').onclick = () => { if (finishFill) finishFill(); flushSave(); openPack(currentPack); };
+  $('#backBtn').onclick = () => { if (finishFill) finishFill(); cancelAnimationFrame(game.raf); game.kind = null; flushSave(); openPack(currentPack); };
   $('#trashBtn').onclick = () => $('#confirm').classList.add('show');
   $('#confirmNo').onclick = () => $('#confirm').classList.remove('show');
   $('#confirmYes').onclick = () => {
     $('#confirm').classList.remove('show');
+    if (mode !== 'color') { pctx.clearRect(0, 0, SIZE, SIZE); scheduleSave(); flushSave(); db.del('paint', `${saveKey(state.pic.id)}:done`); startGame(); pop(250); return; }
     pushUndo(0, 0, SIZE, SIZE);
     pctx.clearRect(0, 0, SIZE, SIZE);
     scheduleSave(); pop(250);
   };
   setupHoldToSave();
   refreshToolbar();
+}
+// Fill the color bar. With numbered=true each swatch shows its number (color by number).
+function buildPalette(list, numbered = false) {
+  const colors = $('#colors'); colors.innerHTML = '';
+  colors.classList.toggle('numbered', numbered);
+  colors.style.setProperty('--n', list.length);
+  list.forEach((c, i) => {
+    const b = el('button', 'swatch' + (c === 'rainbow' ? ' rainbow' : '') + (c === '#ffffff' ? ' white' : ''), numbered ? `<b>${i + 1}</b>` : '');
+    if (c !== 'rainbow') b.style.background = c;
+    b.dataset.color = c; b.setAttribute('aria-label', numbered ? `color ${i + 1}` : c);
+    b.onclick = () => {
+      state.color = c; if (state.tool === 'eraser') state.tool = 'marker';
+      refreshToolbar(); pop(600);
+      if (game.kind === 'number') drawNumbers();
+    };
+    colors.append(b);
+  });
+}
+// Which controls the drawing screen shows: 'color' (everything), 'number' (numbered colors only), 'none'.
+function setControls(kind) {
+  $('#tools').hidden = kind !== 'color';
+  $('#colors').hidden = kind === 'none';
+  $('#undoBtn').hidden = kind !== 'color';
+  $('#linesBtn').hidden = kind !== 'color';
+  if (kind === 'color' && $('#colors').classList.contains('numbered')) buildPalette(COLORS);
+  refreshToolbar(); layoutBoard();
 }
 function refreshToolbar() {
   document.querySelectorAll('.tool').forEach(b => b.classList.toggle('sel', b.dataset.tool === state.tool));
@@ -496,7 +557,7 @@ function scheduleSave() { clearTimeout(state.saveTimer); state.saveTimer = setTi
 function flushSave() {
   if (!state.saveTimer || !state.pic) return;
   clearTimeout(state.saveTimer); state.saveTimer = 0;
-  const id = state.pic.id;
+  const id = saveKey(state.pic.id);
   paint.toBlob(b => b && db.put('paint', id, b), 'image/png');
   db.put('thumbs', id, composite(320).toDataURL('image/jpeg', 0.8));
 }
@@ -508,11 +569,14 @@ async function openPicture(pic) {
   if (finishFill) finishFill();
   pctx.clearRect(0, 0, SIZE, SIZE); lctx.clearRect(0, 0, SIZE, SIZE);
   show('draw');
+  game.kind = null; fctx.clearRect(0, 0, SIZE, SIZE); lines.style.opacity = 1;
+  setControls(mode === 'color' ? 'color' : 'none');
   await loadLineArt(pic.svg);
-  const saved = await db.get('paint', pic.id);
+  const saved = await db.get('paint', saveKey(pic.id));
   if (saved && state.pic === pic) {
     try { const bmp = await createImageBitmap(saved); pctx.drawImage(bmp, 0, 0, SIZE, SIZE); } catch (e) {}
   }
+  if (state.pic === pic && mode !== 'color') await startGame();
 }
 
 // Keep the board square and as large as the stage allows.
@@ -524,8 +588,251 @@ function layoutBoard() {
 window.addEventListener('resize', () => requestAnimationFrame(layoutBoard));
 new ResizeObserver(layoutBoard).observe($('#stage'));
 
+
+// ---------- games: color by number and connect the dots ----------
+const game = { kind: null, pointer: null, raf: 0 };
+const U = SIZE / 1000;                         // art units -> canvas pixels
+const cssK = () => SIZE / (board.clientWidth || SIZE);   // canvas pixels per CSS pixel
+const BLANK = '#ffffff';
+
+function startGame() {
+  cancelAnimationFrame(game.raf);
+  fctx.clearRect(0, 0, SIZE, SIZE);
+  return mode === 'number' ? startNumbers() : startDots();
+}
+
+// Distance (in pixels) from each non-outline pixel to the nearest outline or edge (3-4 chamfer).
+function distanceMap() {
+  const N = SIZE * SIZE, L = state.labels, d = new Float32Array(N);
+  for (let i = 0; i < N; i++) d[i] = L[i] > 0 ? 1e9 : 0;
+  for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+    const i = y * SIZE + x; if (!d[i]) continue;
+    let v = d[i];
+    if (x === 0 || y === 0 || x === SIZE - 1 || y === SIZE - 1) v = 1;
+    else v = Math.min(v, d[i - 1] + 1, d[i - SIZE] + 1, d[i - SIZE - 1] + 1.4, d[i - SIZE + 1] + 1.4);
+    d[i] = v;
+  }
+  for (let y = SIZE - 2; y > 0; y--) for (let x = SIZE - 2; x > 0; x--) {
+    const i = y * SIZE + x; if (!d[i]) continue;
+    d[i] = Math.min(d[i], d[i + 1] + 1, d[i + SIZE] + 1, d[i + SIZE + 1] + 1.4, d[i + SIZE - 1] + 1.4);
+  }
+  return d;
+}
+
+// Regions to color and their target colors: from the picture's hints, or picked automatically.
+function numberTargets() {
+  const hints = (EXTRAS[state.pic.id] || {}).colors;
+  const targets = new Map();
+  if (hints && hints.length) {
+    for (const [x, y, c] of hints) {
+      const id = regionAt(x * U, y * U);
+      if (id && !targets.has(id)) targets.set(id, c.toLowerCase());
+    }
+  } else {
+    const auto = ['#4fc3f7', '#fdd835', '#9ccc65', '#f48fb1', '#fb8c00', '#b39ddb'];
+    const big = state.regions.map((r, id) => [id, r ? r.count : 0]).filter(([, n]) => n > 2500).sort((a, b) => b[1] - a[1]);
+    big.forEach(([id], i) => targets.set(id, auto[i % auto.length]));
+  }
+  return targets;
+}
+
+async function startNumbers() {
+  game.kind = 'number';
+  const targets = numberTargets();
+  const dist = distanceMap();
+  // the most inside point of each target region is where its number goes
+  const best = new Map([...targets.keys()].map(id => [id, { d: 0, i: 0 }]));
+  const L = state.labels;
+  for (let i = 0; i < L.length; i++) { const b = best.get(L[i]); if (b && dist[i] > b.d) { b.d = dist[i]; b.i = i; } }
+  const palette = [...new Set([...targets.values()].filter(c => c !== BLANK))];
+  const paintData = pctx.getImageData(0, 0, SIZE, SIZE).data;
+  game.items = [];
+  for (const [id, color] of targets) {
+    const b = best.get(id), x = b.i % SIZE, y = (b.i / SIZE) | 0;
+    const item = { id, color, x, y, room: b.d, n: palette.indexOf(color) + 1, done: color === BLANK };
+    if (!item.done && paintData[(y * SIZE + x) * 4 + 3] > 0) item.done = true;   // colored earlier
+    game.items.push(item);
+  }
+  // regions too small to hold a readable number are colored for the child
+  const minRoom = 12 * cssK();
+  for (const it of game.items) if (!it.done && it.room < minRoom) { paintRegion(it.id, it.color); it.done = true; }
+  game.palette = palette;
+  buildPalette(palette, true);
+  state.color = palette.find(c => game.items.some(it => !it.done && it.color === c)) || palette[0];
+  setControls('number');
+  drawNumbers();
+  if (game.items.every(it => it.done)) scheduleSave();
+}
+
+function paintRegion(id, color) {
+  const m = regionMask(id);
+  const layer = canvas(m.w, m.h), c = layer.getContext('2d');
+  c.drawImage(m.canvas, 0, 0); c.globalCompositeOperation = 'source-in';
+  c.fillStyle = color; c.fillRect(0, 0, m.w, m.h);
+  pctx.drawImage(layer, m.x, m.y);
+}
+
+function drawNumbers() {
+  if (game.kind !== 'number') return;
+  fctx.clearRect(0, 0, SIZE, SIZE);
+  const k = cssK();
+  // faint tint shows where the selected color goes
+  for (const it of game.items) {
+    if (it.done || it.color !== state.color) continue;
+    const m = regionMask(it.id);
+    const layer = canvas(m.w, m.h), c = layer.getContext('2d');
+    c.drawImage(m.canvas, 0, 0); c.globalCompositeOperation = 'source-in';
+    c.fillStyle = it.color; c.globalAlpha = 0.28; c.fillRect(0, 0, m.w, m.h);
+    fctx.drawImage(layer, m.x, m.y);
+  }
+  fctx.textAlign = 'center'; fctx.textBaseline = 'middle';
+  for (const it of game.items) {
+    if (it.done) continue;
+    const r = Math.min(it.room * 0.8, 22 * k), sel = it.color === state.color;
+    fctx.beginPath(); fctx.arc(it.x, it.y, r, 0, Math.PI * 2);
+    fctx.fillStyle = sel ? '#fff' : 'rgba(255,255,255,.85)'; fctx.fill();
+    fctx.lineWidth = Math.max(2, r * 0.14); fctx.strokeStyle = it.color; fctx.stroke();
+    fctx.fillStyle = '#333'; fctx.font = `800 ${Math.round(r * 1.15)}px ui-rounded, system-ui, sans-serif`;
+    fctx.fillText(it.n, it.x, it.y + r * 0.05);
+  }
+}
+
+function numberTap(p) {
+  const id = regionAt(p.x, p.y);
+  const it = game.items.find(x => x.id === id && !x.done);
+  if (!it) return;
+  if (it.color !== state.color) {
+    const sw = document.querySelector(`.swatch[data-color="${state.color}"]`);
+    if (sw) { sw.classList.remove('nope'); void sw.offsetWidth; sw.classList.add('nope'); }
+    pop(200);
+    return;
+  }
+  it.done = true;
+  fillAt(p.x, p.y, id);
+  drawNumbers();
+  if (game.items.every(x => x.done)) { setTimeout(celebrate, 350); return; }
+  // when one color is finished, move on to the next one
+  if (!game.items.some(x => !x.done && x.color === state.color)) {
+    const next = game.palette.find(c => game.items.some(x => !x.done && x.color === c));
+    const finished = state.color;
+    if (next) setTimeout(() => { if (state.color !== finished) return; state.color = next; refreshToolbar(); drawNumbers(); }, 400);
+  }
+}
+
+// ----- connect the dots -----
+async function startDots() {
+  game.kind = 'dots';
+  game.dots = ((EXTRAS[state.pic.id] || {}).dots || []).map(([x, y]) => ({ x: x * U, y: y * U }));
+  const done = await db.get('paint', `${saveKey(state.pic.id)}:done`);
+  if (done) return finishDots(false);
+  game.next = 1; game.pointer = null; game.trail = null;
+  lines.style.opacity = 0.12;
+  setControls('none');
+  const loop = t => { drawDots(t); game.raf = requestAnimationFrame(loop); };
+  game.raf = requestAnimationFrame(loop);
+}
+
+function drawDots(t = 0) {
+  const k = cssK(), d = game.dots;
+  fctx.clearRect(0, 0, SIZE, SIZE);
+  fctx.lineCap = 'round'; fctx.lineJoin = 'round';
+  fctx.strokeStyle = '#222'; fctx.lineWidth = 5 * k;
+  fctx.beginPath();
+  for (let i = 0; i < game.next && i < d.length; i++) i ? fctx.lineTo(d[i].x, d[i].y) : fctx.moveTo(d[i].x, d[i].y);
+  if (game.next > d.length) fctx.closePath();
+  fctx.stroke();
+  if (game.trail && game.next <= d.length) {   // finger dragging from the last dot
+    const a = d[game.next - 1];
+    fctx.save(); fctx.setLineDash([4 * k, 6 * k]); fctx.strokeStyle = '#999';
+    fctx.beginPath(); fctx.moveTo(a.x, a.y); fctx.lineTo(game.trail.x, game.trail.y); fctx.stroke(); fctx.restore();
+  }
+  fctx.textAlign = 'center'; fctx.textBaseline = 'middle';
+  d.forEach((p, i) => {
+    const isNext = i === game.next;
+    const r = (isNext ? 11 + Math.sin(t / 180) * 2.5 : 8) * k;
+    if (isNext) { fctx.beginPath(); fctx.arc(p.x, p.y, r * 1.9, 0, Math.PI * 2); fctx.fillStyle = 'rgba(124,77,255,.18)'; fctx.fill(); }
+    fctx.beginPath(); fctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    fctx.fillStyle = i < game.next ? '#7c4dff' : isNext ? '#ff9800' : '#fff'; fctx.fill();
+    fctx.lineWidth = 2.5 * k; fctx.strokeStyle = '#222'; fctx.stroke();
+    fctx.font = `800 ${Math.round(15 * k)}px ui-rounded, system-ui, sans-serif`;
+    fctx.lineWidth = 4 * k; fctx.strokeStyle = '#fff';
+    const lx = p.x + 17 * k, ly = p.y - 15 * k;
+    fctx.strokeText(i + 1, lx, ly); fctx.fillStyle = '#222'; fctx.fillText(i + 1, lx, ly);
+  });
+}
+
+function dotsHit(p) {
+  if (game.next >= game.dots.length) return false;
+  const q = game.dots[game.next], k = cssK();
+  if (Math.hypot(p.x - q.x, p.y - q.y) > 30 * k) return false;
+  game.next++;
+  pop(400 + game.next * 30);
+  if (game.next >= game.dots.length) { game.next = game.dots.length + 1; setTimeout(() => finishDots(true), 250); }
+  return true;
+}
+function dotsDown(p, pointerId) {
+  if (game.next > game.dots.length) return;
+  game.pointer = pointerId; board.setPointerCapture(pointerId);
+  // touching the first dot (or any dot already reached) just starts a drag
+  dotsHit(p);
+}
+function dotsMove(p) {
+  if (game.next > game.dots.length) { game.trail = null; return; }
+  game.trail = p;
+  dotsHit(p);
+}
+
+async function finishDots(animate) {
+  game.trail = null;
+  db.put('paint', `${saveKey(state.pic.id)}:done`, true);
+  cancelAnimationFrame(game.raf);
+  game.next = game.dots.length + 1;
+  if (animate) {
+    drawDots();
+    const t0 = performance.now();
+    await new Promise(res => {
+      const step = now => {
+        const k = Math.min(1, (now - t0) / 700);
+        lines.style.opacity = 0.12 + 0.88 * k; fx.style.opacity = 1 - k;
+        k < 1 ? requestAnimationFrame(step) : res();
+      };
+      requestAnimationFrame(step);
+    });
+    fctx.clearRect(0, 0, SIZE, SIZE); fx.style.opacity = 1;
+    celebrate();
+  } else { fctx.clearRect(0, 0, SIZE, SIZE); lines.style.opacity = 1; }
+  // now it is a normal coloring page
+  game.kind = null;
+  state.tool = 'fill';
+  setControls('color');
+}
+
+// ----- confetti -----
+function celebrate() {
+  const k = cssK(), parts = [];
+  const cols = ['#e53935', '#fdd835', '#43a047', '#1e88e5', '#8e24aa', '#fb8c00', '#ec407a'];
+  for (let i = 0; i < 140; i++) parts.push({
+    x: SIZE / 2 + rand(-80, 80) * k, y: SIZE * 0.55, vx: rand(-9, 9) * k, vy: rand(-22, -8) * k,
+    s: rand(5, 10) * k, c: cols[i % cols.length], r: rand(0, 6), vr: rand(-0.3, 0.3),
+  });
+  [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => pop(f), i * 110));
+  const t0 = performance.now();
+  const step = now => {
+    fctx.clearRect(0, 0, SIZE, SIZE);
+    for (const p of parts) {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.5 * k; p.r += p.vr;
+      fctx.save(); fctx.translate(p.x, p.y); fctx.rotate(p.r); fctx.fillStyle = p.c;
+      fctx.fillRect(-p.s / 2, -p.s / 4, p.s, p.s / 2); fctx.restore();
+    }
+    if (now - t0 < 2200) requestAnimationFrame(step);
+    else { fctx.clearRect(0, 0, SIZE, SIZE); drawNumbers(); }
+  };
+  requestAnimationFrame(step);
+}
+window.addEventListener('resize', () => { if (game.kind === 'number') requestAnimationFrame(drawNumbers); });
+
 // ---------- boot ----------
 buildToolbar();
 renderHome();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-window.__colorfun = { state, fillAt, openPicture, PACKS }; // for testing
+window.__colorfun = { state, game, fillAt, openPicture, PACKS }; // for testing
