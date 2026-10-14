@@ -138,7 +138,7 @@ async function openPack(pack) {
   const grid = $('#picGrid'); grid.innerHTML = '';
   for (const pic of picturesFor(pack)) {
     const t = el('button', 'tile');
-    const th = el('div', 'thumb', pic.svg);
+    const th = el('div', 'thumb', pic.src ? `<img src="${pic.src}" alt="" loading="lazy">` : pic.svg);
     t.append(th);
     t.onclick = () => openPicture(pic);
     grid.append(t);
@@ -162,15 +162,14 @@ const state = {
 };
 
 // Rasterize the picture's line art, build the transparent outline overlay and region label map.
-async function loadLineArt(svg) {
-  const sized = svg.replace('<svg', `<svg width="${SIZE}" height="${SIZE}"`);
-  const url = URL.createObjectURL(new Blob([sized], { type: 'image/svg+xml' }));
+async function loadLineArt(pic) {
+  const url = pic.src || URL.createObjectURL(new Blob([pic.svg.replace('<svg', `<svg width="${SIZE}" height="${SIZE}"`)], { type: 'image/svg+xml' }));
   const img = new Image();
   await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
   const src = canvas(), c = src.getContext('2d', { willReadFrequently: true });
   c.fillStyle = '#fff'; c.fillRect(0, 0, SIZE, SIZE);
   c.drawImage(img, 0, 0, SIZE, SIZE);
-  URL.revokeObjectURL(url);
+  if (!pic.src) URL.revokeObjectURL(url);
   const data = c.getImageData(0, 0, SIZE, SIZE).data;
 
   // outline overlay: darkness becomes alpha, so white areas are see-through
@@ -571,7 +570,7 @@ async function openPicture(pic) {
   show('draw');
   game.kind = null; fctx.clearRect(0, 0, SIZE, SIZE); lines.style.opacity = 1;
   setControls(mode === 'color' ? 'color' : 'none');
-  await loadLineArt(pic.svg);
+  await loadLineArt(pic);
   const saved = await db.get('paint', saveKey(pic.id));
   if (saved && state.pic === pic) {
     try { const bmp = await createImageBitmap(saved); pctx.drawImage(bmp, 0, 0, SIZE, SIZE); } catch (e) {}

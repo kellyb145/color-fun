@@ -5,6 +5,12 @@ const root = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
 const packs = ['animals', 'ocean', 'vehicles', 'space', 'fantasy', 'halloween'];
 let js = packs.map(p => read(`art/${p}.js`).replace(/export\s+default/, `const pack_${p} =`)).join('\n');
+// raster packs: inline their PNGs as data URIs so the single file works on its own
+js += '\n' + read('art/gemini.js').replace(/export\s+default/, 'const friends =')
+  .replace('src: `art/gemini/${id}.png`', 'src: GEM[id]');
+const gemDir = path.join(root, 'art/gemini');
+js = 'const GEM = {' + fs.readdirSync(gemDir).filter(f => f.endsWith('.png')).map(f =>
+  `'${f.slice(0, -4)}': 'data:image/png;base64,${fs.readFileSync(path.join(gemDir, f)).toString('base64')}'`).join(',\n') + '};\n' + js;
 js += '\n' + read('art/index.js').replace(/^import .*$/gm, '').replace(/import (\w+) from '\.\/(\w+)\.js';/g, '')
   .replace(/export\s+default/, 'const PACKS =');
 js = js.replace(/const PACKS = \[([^\]]*)\]/, (m, list) => `const PACKS = [${list.split(',').map(s => s.trim()).map(s => packs.includes(s) ? `pack_${s}` : s).join(', ')}]`);

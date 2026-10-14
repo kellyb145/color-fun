@@ -14,6 +14,8 @@ Packs live in `art/*.js`. Each picture is an SVG with `viewBox="0 0 1000 1000"`,
 
 Color by number and connect the dots read `art/extras/<pack>.js`: per picture, `colors` is a list of `[x, y, '#hex']` points (one inside each region to color) and `dots` is the connect-the-dots path around the main subject. `tools/render-extras.js` draws both over the picture for checking. Pictures without `colors` get automatic colors; pictures without `dots` are hidden in Dots mode.
 
+Raster pictures: a picture can use `src` (a PNG path) instead of `svg`. `art/gemini.js` is an example; its PNGs in `art/gemini/` are cleaned-up Gemini line art (black lines on white, 1536 square). Add new PNG paths to the `FILES` list in `sw.js` so they work offline.
+
 ## Preview locally
 
     npx http-server -p 8080 .

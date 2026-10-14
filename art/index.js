@@ -4,6 +4,7 @@ import vehicles from './vehicles.js';
 import space from './space.js';
 import fantasy from './fantasy.js';
 import halloween from './halloween.js';
+import friends from './gemini.js';
 
 const blank = {
   id: 'draw', title: 'Draw', icon: '✏️',
@@ -14,4 +15,4 @@ const blank = {
 };
 
 // Order shown on the home screen (packs in season jump to the front).
-export default [halloween, animals, ocean, fantasy, vehicles, space, blank];
+export default [halloween, friends, animals, ocean, fantasy, vehicles, space, blank];
