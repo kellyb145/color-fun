@@ -7,5 +7,8 @@ import vehicles from './vehicles.js';
 import space from './space.js';
 import fantasy from './fantasy.js';
 import halloween from './halloween.js';
+import thanksgiving from './thanksgiving.js';
+import christmas from './christmas.js';
+import winter from './winter.js';
 
-export default Object.assign({}, animals, ocean, vehicles, space, fantasy, halloween);
+export default Object.assign({}, animals, ocean, vehicles, space, fantasy, halloween, thanksgiving, christmas, winter);

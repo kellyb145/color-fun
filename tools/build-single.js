@@ -3,7 +3,7 @@
 const fs = require('fs'), path = require('path');
 const root = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');
-const packs = ['animals', 'ocean', 'vehicles', 'space', 'fantasy', 'halloween'];
+const packs = ['animals', 'ocean', 'vehicles', 'space', 'fantasy', 'halloween', 'thanksgiving', 'christmas', 'winter'];
 let js = packs.map(p => read(`art/${p}.js`).replace(/export\s+default/, `const pack_${p} =`)).join('\n');
 // raster packs: inline their PNGs as data URIs so the single file works on its own
 js += '\n' + read('art/gemini.js').replace(/export\s+default/, 'const friends =')
