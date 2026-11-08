@@ -1,5 +1,5 @@
 // Offline support: cache everything on install, serve cache first, refresh in the background.
-const CACHE = 'colorfun-v4';
+const CACHE = 'colorfun-v5';
 const FILES = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'art/index.js', 'art/animals.js', 'art/ocean.js', 'art/vehicles.js', 'art/space.js', 'art/fantasy.js', 'art/halloween.js', 'art/gemini.js',

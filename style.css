@@ -166,3 +166,33 @@ button { font: inherit; border: 0; cursor: pointer; touch-action: manipulation; 
   .mode { font-size: 18px; padding: 6px 16px 6px 10px; } .mode .emoji { font-size: 26px; }
 }
 @media (prefers-reduced-motion: reduce) { .swatch.nope { animation: none; } }
+
+/* stickers */
+.round.pink { background: #f8bbd0; }
+#stickers, #puzzle { position: absolute; inset: 0; pointer-events: none; }
+.sticker {
+  position: absolute; transform: translate(-50%, -50%); line-height: 1; pointer-events: auto; touch-action: none;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,.25)); transition: transform .15s;
+}
+.sticker.lift { transform: translate(-50%, -50%) scale(1.15); }
+.sticker.gone { pointer-events: none; transform: translate(-50%, -50%) scale(0); opacity: 0; transition: transform .3s, opacity .3s; }
+.tray { max-width: min(92vw, 640px); padding: 20px; }
+#trayGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 10px; max-height: 70vh; overflow-y: auto; }
+.traysticker { font-size: 50px; height: 76px; border-radius: 18px; background: #f3ecff; line-height: 1; }
+.traysticker:active { transform: scale(.92); }
+
+/* scratch cover */
+#cover { display: none; pointer-events: none; }
+
+/* puzzle */
+.pieces { grid-area: tools; }
+.piece {
+  position: absolute; pointer-events: auto; touch-action: none; border-radius: 6px;
+  box-shadow: 0 0 0 3px #fff, 0 6px 14px rgba(0,0,0,.3); transition: box-shadow .15s, transform .15s;
+  transform: scale(.78);   /* loose pieces are a bit smaller so the faint picture shows through */
+}
+.piece.lift { transform: scale(1); box-shadow: 0 0 0 4px #ffd54f, 0 12px 24px rgba(0,0,0,.35); }
+.piece.placed { pointer-events: none; border-radius: 0; box-shadow: none; transition: none; transform: none; }
+.piececount i { display: grid; gap: 3px; width: 34px; height: 34px; }
+.piececount b { background: var(--accent); border-radius: 3px; }

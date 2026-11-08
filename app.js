@@ -22,6 +22,11 @@ const TOOLS = [
   { id: 'eraser', icon: '🧽' },
 ];
 const SIZES = [0.55, 1, 1.7];
+const STICKERS = ['⭐', '❤️', '🌈', '🦄', '🐶', '🐱', '🐰', '🦋', '🌸', '🍭', '🎈', '👑', '🌙', '☀️', '🚀', '🐠',
+  '🦕', '🍩', '🎃', '🦃', '🍂', '🎄', '🎁', '⛄', '❄️', '🐧', '🦊', '🍓'];
+const STICKER_SIZES = [100, 160, 240];          // art units (picture is 1000 wide)
+const NUM_BRUSH = 64;                           // color by number brush width (canvas px)
+const NUM_DONE = 0.8;                           // share of a space that counts as colored in
 const BASE_WIDTH = { marker: 30, crayon: 34, brush: 46, glitter: 34, eraser: 44 };
 
 // ---------- tiny helpers ----------
@@ -90,7 +95,11 @@ const MODES = [
   { id: 'color', icon: '🎨', title: 'Color' },
   { id: 'number', icon: '🔢', title: 'Numbers' },
   { id: 'dots', icon: '⭐', title: 'Dots' },
+  { id: 'scratch', icon: '🪄', title: 'Scratch' },
+  { id: 'mirror', icon: '🦋', title: 'Mirror' },
+  { id: 'puzzle', icon: '🧩', title: 'Puzzle' },
 ];
+const GAMES = ['number', 'dots', 'scratch', 'puzzle'];   // modes that run a game on the picture
 let mode = 'color';
 try { mode = localStorage.getItem('colorfun-mode') || 'color'; } catch (e) {}
 if (!MODES.some(m => m.id === mode)) mode = 'color';
@@ -98,6 +107,7 @@ if (!MODES.some(m => m.id === mode)) mode = 'color';
 // Pictures a mode can use: numbers needs color hints or regions, dots needs a dot path.
 function picturesFor(pack) {
   if (mode === 'color') return pack.pictures;
+  if (mode === 'mirror') return pack.id === 'draw' ? pack.pictures : [];
   if (pack.id === 'draw') return [];
   if (mode === 'dots') return pack.pictures.filter(p => EXTRAS[p.id] && EXTRAS[p.id].dots && EXTRAS[p.id].dots.length > 2);
   return pack.pictures;
@@ -148,8 +158,9 @@ async function openPack(pack) {
 }
 
 // ---------- drawing state ----------
-const paint = $('#paint'), lines = $('#lines'), fx = $('#fx');
-[paint, lines, fx].forEach(c => { c.width = SIZE; c.height = SIZE; });
+const paint = $('#paint'), lines = $('#lines'), fx = $('#fx'), cover = $('#cover');
+[paint, lines, fx, cover].forEach(c => { c.width = SIZE; c.height = SIZE; });
+const cctx = cover.getContext('2d', { willReadFrequently: true });
 const pctx = paint.getContext('2d', { willReadFrequently: true });
 const lctx = lines.getContext('2d');
 const fctx = fx.getContext('2d');
@@ -158,7 +169,7 @@ const backup = canvas(), bctx = backup.getContext('2d');
 
 const state = {
   pic: null, tool: 'fill', color: COLORS[0], size: 1, stayInLines: true,
-  labels: null, regions: [], maskCache: new Map(), undo: [], undoBytes: 0, saveTimer: 0,
+  labels: null, regions: [], maskCache: new Map(), undo: [], undoBytes: 0, saveTimer: 0, stickers: [],
 };
 
 // Rasterize the picture's line art, build the transparent outline overlay and region label map.
@@ -323,11 +334,14 @@ function fillAt(x, y, regionId) {
 // ---------- brushes ----------
 const stroke = { active: false, pointer: null, last: null, dist: 0, clip: null, box: null };
 
-function beginStroke(x, y, pointerId) {
+function beginStroke(x, y, pointerId, opts = {}) {
   stroke.active = true; stroke.pointer = pointerId; stroke.last = { x, y }; stroke.dist = 0;
   stroke.box = { x0: x, y0: y, x1: x, y1: y };
+  stroke.tool = opts.tool || state.tool;
+  stroke.width = opts.width || BASE_WIDTH[stroke.tool] * SIZES[state.size];
   stroke.clip = null;
-  if (state.stayInLines) {
+  if (opts.clip) stroke.clip = opts.clip;
+  else if (state.stayInLines) {
     const id = regionAt(x, y);
     if (id) stroke.clip = regionMask(id);
   }
@@ -341,7 +355,7 @@ function clearOf(color) { return color.startsWith('hsl(') ? color.replace('hsl('
 
 // Draw one segment with the current tool into ctx.
 function drawSegment(ctx, a, b, w) {
-  const tool = state.tool, color = strokeColor();
+  const tool = stroke.tool, color = strokeColor();
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   if (tool === 'marker' || tool === 'eraser' || tool === 'glitter') {
@@ -382,11 +396,17 @@ function drawSegment(ctx, a, b, w) {
 
 function strokeTo(x, y, first = false) {
   const a = first ? { x: x - 0.01, y } : stroke.last, b = { x, y };
-  const w = BASE_WIDTH[state.tool] * SIZES[state.size];
+  stroke.dist += Math.hypot(b.x - a.x, b.y - a.y);
+  strokeSeg(a, b);
+  // mirror painting: everything also appears flipped on the other half
+  if (mode === 'mirror' && !game.kind) strokeSeg({ x: SIZE - a.x, y: a.y }, { x: SIZE - b.x, y: b.y });
+  stroke.last = b;
+}
+function strokeSeg(a, b) {
+  const w = stroke.width;
   const pad = w * 2.5 + 4;
   const bx = Math.floor(Math.min(a.x, b.x) - pad), by = Math.floor(Math.min(a.y, b.y) - pad);
   const bw = Math.ceil(Math.abs(b.x - a.x) + pad * 2), bh = Math.ceil(Math.abs(b.y - a.y) + pad * 2);
-  stroke.dist += Math.hypot(b.x - a.x, b.y - a.y);
   const box = stroke.box;
   box.x0 = Math.min(box.x0, bx); box.y0 = Math.min(box.y0, by); box.x1 = Math.max(box.x1, bx + bw); box.y1 = Math.max(box.y1, by + bh);
 
@@ -407,10 +427,9 @@ function strokeTo(x, y, first = false) {
     sctx.restore();
     sctx.globalCompositeOperation = 'source-over';
   }
-  pctx.globalCompositeOperation = state.tool === 'eraser' ? 'destination-out' : 'source-over';
+  pctx.globalCompositeOperation = stroke.tool === 'eraser' ? 'destination-out' : 'source-over';
   pctx.drawImage(scratch, bx, by, bw, bh, bx, by, bw, bh);
   pctx.globalCompositeOperation = 'source-over';
-  stroke.last = b;
 }
 
 function endStroke() {
@@ -431,8 +450,10 @@ board.addEventListener('pointerdown', e => {
   if (stroke.active || !state.labels) return;   // ignore a second finger / palm
   e.preventDefault();
   const p = toCanvas(e);
-  if (game.kind === 'number') { numberTap(p); return; }
+  if (game.kind === 'number') { numberDown(p, e.pointerId); return; }
   if (game.kind === 'dots') { dotsDown(p, e.pointerId); return; }
+  if (game.kind === 'scratch') { scratchDown(p, e.pointerId); return; }
+  if (game.kind === 'puzzle') return;
   if (state.tool === 'fill') { fillAt(p.x, p.y); return; }
   if (finishFill) finishFill();
   board.setPointerCapture(e.pointerId);
@@ -440,13 +461,21 @@ board.addEventListener('pointerdown', e => {
 });
 board.addEventListener('pointermove', e => {
   if (game.kind === 'dots') { if (e.pointerId === game.pointer) dotsMove(toCanvas(e)); return; }
-  if (!stroke.active || e.pointerId !== stroke.pointer) return;
   const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  if (game.kind === 'scratch') {
+    if (e.pointerId === game.pointer) for (const ev of (events.length ? events : [e])) scratchTo(toCanvas(ev));
+    return;
+  }
+  if (!stroke.active || e.pointerId !== stroke.pointer) return;
   for (const ev of (events.length ? events : [e])) { const p = toCanvas(ev); strokeTo(p.x, p.y); }
+  if (game.kind === 'number') numberCheck(false);
 });
 ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => board.addEventListener(t, e => {
-  if (e.pointerId === game.pointer) { game.pointer = null; game.trail = null; }
-  if (e.pointerId === stroke.pointer) endStroke();
+  if (e.pointerId === game.pointer) { game.pointer = null; game.trail = null; if (game.kind === 'scratch') scratchCheck(true); }
+  if (e.pointerId === stroke.pointer) {
+    endStroke();
+    if (game.kind === 'number') { numberCheck(true); game.painting = null; }
+  }
 }));
 document.addEventListener('gesturestart', e => e.preventDefault());
 document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
@@ -471,12 +500,15 @@ function buildToolbar() {
   buildPalette(COLORS);
   $('#undoBtn').onclick = undo;
   $('#linesBtn').onclick = () => { state.stayInLines = !state.stayInLines; refreshToolbar(); };
-  $('#backBtn').onclick = () => { if (finishFill) finishFill(); cancelAnimationFrame(game.raf); game.kind = null; flushSave(); openPack(currentPack); };
+  $('#backBtn').onclick = () => { if (finishFill) finishFill(); stopGame(); flushSave(); openPack(currentPack); };
+  buildStickerTray();
+  buildPieces();
   $('#trashBtn').onclick = () => $('#confirm').classList.add('show');
   $('#confirmNo').onclick = () => $('#confirm').classList.remove('show');
   $('#confirmYes').onclick = () => {
     $('#confirm').classList.remove('show');
-    if (mode !== 'color') { pctx.clearRect(0, 0, SIZE, SIZE); scheduleSave(); flushSave(); db.del('paint', `${saveKey(state.pic.id)}:done`); startGame(); pop(250); return; }
+    state.stickers = []; renderStickers(); saveStickers();
+    if (GAMES.includes(mode)) { pctx.clearRect(0, 0, SIZE, SIZE); scheduleSave(); flushSave(); db.del('paint', `${saveKey(state.pic.id)}:done`); stopGame(); startGame(); pop(250); return; }
     pushUndo(0, 0, SIZE, SIZE);
     pctx.clearRect(0, 0, SIZE, SIZE);
     scheduleSave(); pop(250);
@@ -504,14 +536,16 @@ function buildPalette(list, numbered = false) {
 // Which controls the drawing screen shows: 'color' (everything), 'number' (numbered colors only), 'none'.
 function setControls(kind) {
   $('#tools').hidden = kind !== 'color';
-  $('#colors').hidden = kind === 'none';
+  $('#pieces').hidden = kind !== 'puzzle';
+  $('#stickerBtn').hidden = kind === 'puzzle';
+  $('#colors').hidden = kind === 'none' || kind === 'puzzle';
   $('#undoBtn').hidden = kind !== 'color';
   $('#linesBtn').hidden = kind !== 'color';
   if (kind === 'color' && $('#colors').classList.contains('numbered')) buildPalette(COLORS);
   refreshToolbar(); layoutBoard();
 }
 function refreshToolbar() {
-  document.querySelectorAll('.tool').forEach(b => b.classList.toggle('sel', b.dataset.tool === state.tool));
+  document.querySelectorAll('.tool[data-tool]').forEach(b => b.classList.toggle('sel', b.dataset.tool === state.tool));
   document.querySelectorAll('.swatch').forEach(b => b.classList.toggle('sel', b.dataset.color === state.color));
   document.querySelectorAll('.size').forEach((b, i) => b.classList.toggle('sel', i === state.size));
   $('#linesBtn').classList.toggle('off', !state.stayInLines);
@@ -539,6 +573,11 @@ function composite(size = SIZE) {
   x.fillStyle = '#fff'; x.fillRect(0, 0, size, size);
   x.drawImage(paint, 0, 0, size, size);
   x.drawImage(lines, 0, 0, size, size);
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  for (const st of state.stickers) {
+    x.font = `${Math.round(st.s * size / 1000)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+    x.fillText(st.e, st.x * size / 1000, st.y * size / 1000 + st.s * size / 1000 * 0.06);
+  }
   return c;
 }
 async function exportPicture() {
@@ -567,22 +606,28 @@ async function openPicture(pic) {
   state.pic = pic; state.undo = []; state.undoBytes = 0; state.labels = null; updateUndoBtn();
   if (finishFill) finishFill();
   pctx.clearRect(0, 0, SIZE, SIZE); lctx.clearRect(0, 0, SIZE, SIZE);
+  state.stickers = []; renderStickers();
   show('draw');
-  game.kind = null; fctx.clearRect(0, 0, SIZE, SIZE); lines.style.opacity = 1;
-  setControls(mode === 'color' ? 'color' : 'none');
+  stopGame();
+  setControls(GAMES.includes(mode) ? 'none' : 'color');
   await loadLineArt(pic);
   const saved = await db.get('paint', saveKey(pic.id));
   if (saved && state.pic === pic) {
     try { const bmp = await createImageBitmap(saved); pctx.drawImage(bmp, 0, 0, SIZE, SIZE); } catch (e) {}
   }
-  if (state.pic === pic && mode !== 'color') await startGame();
+  const st = await db.get('paint', `${saveKey(pic.id)}:stickers`);
+  if (state.pic !== pic) return;
+  try { state.stickers = st ? JSON.parse(st) : []; } catch (e) { state.stickers = []; }
+  renderStickers();
+  if (mode === 'mirror') drawMirrorGuide();
+  if (GAMES.includes(mode)) await startGame();
 }
 
 // Keep the board square and as large as the stage allows.
 function layoutBoard() {
   const st = $('#stage');
   const s = Math.floor(Math.min(st.clientWidth, st.clientHeight));
-  if (s > 0) { board.style.width = board.style.height = s + 'px'; }
+  if (s > 0) { board.style.width = board.style.height = s + 'px'; sizeStickers(); }
 }
 window.addEventListener('resize', () => requestAnimationFrame(layoutBoard));
 new ResizeObserver(layoutBoard).observe($('#stage'));
@@ -597,7 +642,20 @@ const BLANK = '#ffffff';
 function startGame() {
   cancelAnimationFrame(game.raf);
   fctx.clearRect(0, 0, SIZE, SIZE);
-  return mode === 'number' ? startNumbers() : startDots();
+  if (mode === 'number') return startNumbers();
+  if (mode === 'dots') return startDots();
+  if (mode === 'scratch') return startScratch();
+  if (mode === 'puzzle') return startPuzzle();
+}
+
+// Leave whatever game is running and put the board back to normal.
+function stopGame() {
+  cancelAnimationFrame(game.raf);
+  game.kind = null; game.pointer = null; game.painting = null;
+  fctx.clearRect(0, 0, SIZE, SIZE); fx.style.opacity = 1;
+  cover.style.display = 'none'; cover.style.opacity = 1;
+  $('#puzzle').innerHTML = '';
+  paint.style.opacity = 1; lines.style.opacity = 1;
 }
 
 // Distance (in pixels) from each non-outline pixel to the nearest outline or edge (3-4 chamfer).
@@ -644,12 +702,18 @@ async function startNumbers() {
   const L = state.labels;
   for (let i = 0; i < L.length; i++) { const b = best.get(L[i]); if (b && dist[i] > b.d) { b.d = dist[i]; b.i = i; } }
   const palette = [...new Set([...targets.values()].filter(c => c !== BLANK))];
-  const paintData = pctx.getImageData(0, 0, SIZE, SIZE).data;
+  // how much of each space was colored in earlier
+  const paintData = pctx.getImageData(0, 0, SIZE, SIZE).data, tot = new Map(), got = new Map();
+  for (let i = 0; i < L.length; i++) {
+    const id = L[i]; if (!targets.has(id)) continue;
+    tot.set(id, (tot.get(id) || 0) + 1);
+    if (paintData[i * 4 + 3] > 40) got.set(id, (got.get(id) || 0) + 1);
+  }
   game.items = [];
   for (const [id, color] of targets) {
     const b = best.get(id), x = b.i % SIZE, y = (b.i / SIZE) | 0;
     const item = { id, color, x, y, room: b.d, n: palette.indexOf(color) + 1, done: color === BLANK };
-    if (!item.done && paintData[(y * SIZE + x) * 4 + 3] > 0) item.done = true;   // colored earlier
+    if (!item.done && (got.get(id) || 0) >= NUM_DONE * tot.get(id)) item.done = true;
     game.items.push(item);
   }
   // regions too small to hold a readable number are colored for the child
@@ -696,7 +760,8 @@ function drawNumbers() {
   }
 }
 
-function numberTap(p) {
+// Color by number: the child colors each space in with a brush (it stays inside that space).
+function numberDown(p, pointerId) {
   const id = regionAt(p.x, p.y);
   const it = game.items.find(x => x.id === id && !x.done);
   if (!it) return;
@@ -706,8 +771,37 @@ function numberTap(p) {
     pop(200);
     return;
   }
+  game.painting = it; game.checked = performance.now();
+  board.setPointerCapture(pointerId);
+  beginStroke(p.x, p.y, pointerId, { tool: 'marker', width: NUM_BRUSH, clip: regionMask(id) });
+}
+// Share of a space that has paint on it.
+function coverage(id) {
+  const r = state.regions[id], w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1;
+  const d = pctx.getImageData(r.x0, r.y0, w, h).data, L = state.labels;
+  let n = 0, tot = 0;
+  for (let y = 0; y < h; y++) {
+    let p = (y + r.y0) * SIZE + r.x0, q = y * w * 4 + 3;
+    for (let x = 0; x < w; x++, p++, q += 4) if (L[p] === id) { tot++; if (d[q] > 40) n++; }
+  }
+  return tot ? n / tot : 1;
+}
+// Once most of the space is colored, finish it off and move on.
+function numberCheck(force) {
+  const it = game.painting;
+  if (!it || it.done) return;
+  const now = performance.now();
+  if (!force && now - game.checked < 300) return;
+  game.checked = now;
+  if (coverage(it.id) < NUM_DONE) return;
+  const last = stroke.last;
+  if (stroke.active) endStroke();
+  game.painting = null;
+  numberDone(it, last);
+}
+function numberDone(it, p) {
   it.done = true;
-  fillAt(p.x, p.y, id);
+  fillAt(p.x, p.y, it.id);
   drawNumbers();
   if (game.items.every(x => x.done)) { setTimeout(celebrate, 350); return; }
   // when one color is finished, move on to the next one
@@ -804,6 +898,250 @@ async function finishDots(animate) {
   game.kind = null;
   state.tool = 'fill';
   setControls('color');
+}
+
+// ----- scratch and reveal -----
+const SCRATCH_DONE = 0.72;
+async function startScratch() {
+  game.kind = 'scratch';
+  if (await db.get('paint', `${saveKey(state.pic.id)}:done`)) { endScratch(); return; }
+  pctx.clearRect(0, 0, SIZE, SIZE);
+  for (const [id, c] of numberTargets()) if (c !== BLANK) paintRegion(id, c);
+  drawCover();
+  cover.style.display = 'block'; cover.style.opacity = 1;
+  game.pointer = null; game.last = null; game.checked = 0;
+  setControls('none');
+}
+function drawCover() {
+  cctx.globalCompositeOperation = 'source-over';
+  const g = cctx.createLinearGradient(0, 0, SIZE, SIZE);
+  g.addColorStop(0, '#2b1055'); g.addColorStop(1, '#1a2a6c');
+  cctx.fillStyle = g; cctx.fillRect(0, 0, SIZE, SIZE);
+  const cols = ['#ffd54f', '#f48fb1', '#80deea', '#c5e1a5', '#ffffff'];
+  for (let i = 0; i < 90; i++) {
+    const x = rand(0, SIZE), y = rand(0, SIZE), r = rand(6, 22);
+    cctx.globalAlpha = rand(0.35, 0.8); cctx.fillStyle = cols[i % cols.length];
+    cctx.beginPath();
+    for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? r * 0.45 : r; cctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr); }
+    cctx.fill();
+  }
+  cctx.globalAlpha = 1;
+}
+function scratchDown(p, pointerId) {
+  if (game.kind !== 'scratch') return;
+  game.pointer = pointerId; board.setPointerCapture(pointerId);
+  game.last = p; scratchTo(p);
+}
+function scratchTo(p) {
+  if (game.kind !== 'scratch' || !game.last) return;
+  cctx.globalCompositeOperation = 'destination-out';
+  cctx.lineCap = 'round'; cctx.lineWidth = 96;
+  cctx.beginPath(); cctx.moveTo(game.last.x, game.last.y); cctx.lineTo(p.x + 0.01, p.y); cctx.stroke();
+  cctx.globalCompositeOperation = 'source-over';
+  if (Math.hypot(p.x - game.last.x, p.y - game.last.y) > 60 && Math.random() < 0.25) pop(rand(700, 1100));
+  game.last = p;
+  scratchCheck(false);
+}
+const tiny = canvas(48, 48), tctx = tiny.getContext('2d', { willReadFrequently: true });
+function scratchCheck(force) {
+  if (game.kind !== 'scratch') return;
+  const now = performance.now();
+  if (!force && now - game.checked < 300) return;
+  game.checked = now;
+  tctx.clearRect(0, 0, 48, 48); tctx.drawImage(cover, 0, 0, 48, 48);
+  const d = tctx.getImageData(0, 0, 48, 48).data;
+  let clear = 0; for (let i = 3; i < d.length; i += 4) if (d[i] < 128) clear++;
+  if (clear / (48 * 48) >= SCRATCH_DONE) finishScratch();
+}
+function finishScratch() {
+  game.kind = 'revealing'; game.pointer = null;
+  const t0 = performance.now();
+  const step = now => {
+    const k = Math.min(1, (now - t0) / 700);
+    cover.style.opacity = 1 - k;
+    if (k < 1) { requestAnimationFrame(step); return; }
+    db.put('paint', `${saveKey(state.pic.id)}:done`, true);
+    endScratch(); scheduleSave(); celebrate();
+  };
+  requestAnimationFrame(step);
+}
+// after the reveal it is a normal coloring page
+function endScratch() {
+  cover.style.display = 'none'; cover.style.opacity = 1;
+  game.kind = null; state.tool = 'fill';
+  setControls('color');
+}
+
+// ----- puzzle -----
+const LAYOUTS = { 4: [2, 2], 6: [3, 2], 9: [3, 3] };
+let pieceCount = 6;
+try { pieceCount = +localStorage.getItem('colorfun-pieces') || 6; } catch (e) {}
+if (!LAYOUTS[pieceCount]) pieceCount = 6;
+function buildPieces() {
+  const bar = $('#pieces');
+  for (const n of [4, 6, 9]) {
+    const [c, r] = LAYOUTS[n];
+    const b = el('button', 'tool piececount', `<i style="grid-template-columns:repeat(${c},1fr)">${'<b></b>'.repeat(n)}</i>`);
+    b.dataset.n = n; b.setAttribute('aria-label', `${n} pieces`);
+    b.onclick = () => {
+      pieceCount = n; try { localStorage.setItem('colorfun-pieces', n); } catch (e) {}
+      pop(700); refreshPieces(); if (game.kind === 'puzzle') shufflePuzzle();
+    };
+    bar.append(b);
+  }
+  refreshPieces();
+}
+function refreshPieces() { document.querySelectorAll('.piececount').forEach(b => b.classList.toggle('sel', +b.dataset.n === pieceCount)); }
+
+// The puzzle uses the child's own coloring of the picture if there is one, otherwise a colored-in version.
+async function startPuzzle() {
+  game.kind = 'puzzle';
+  const pic = state.pic, own = await db.get('paint', pic.id);
+  if (state.pic !== pic) return;
+  pctx.clearRect(0, 0, SIZE, SIZE);
+  let drawn = false;
+  if (own) { try { pctx.drawImage(await createImageBitmap(own), 0, 0, SIZE, SIZE); drawn = true; } catch (e) {} }
+  if (!drawn) for (const [id, c] of numberTargets()) if (c !== BLANK) paintRegion(id, c);
+  const ownStickers = await db.get('paint', `${pic.id}:stickers`);
+  try { state.stickers = ownStickers ? JSON.parse(ownStickers) : []; } catch (e) { state.stickers = []; }
+  game.url = composite(1024).toDataURL('image/jpeg', 0.9);
+  state.stickers = []; renderStickers();
+  setControls('puzzle');
+  shufflePuzzle();
+}
+function shufflePuzzle() {
+  const [cols, rows] = LAYOUTS[pieceCount], w = 1 / cols, h = 1 / rows;
+  const layer = $('#puzzle'); layer.innerHTML = '';
+  paint.style.opacity = 0.15; lines.style.opacity = 0.2;
+  fctx.clearRect(0, 0, SIZE, SIZE);
+  game.pieces = []; game.z = 10;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const pc = el('div', 'piece');
+    const pz = { el: pc, tx: c * w, ty: r * h, w, h, x: 0, y: 0, placed: false };
+    pc.style.width = w * 100 + '%'; pc.style.height = h * 100 + '%';
+    pc.style.backgroundImage = `url(${game.url})`;
+    pc.style.backgroundSize = `${cols * 100}% ${rows * 100}%`;
+    pc.style.backgroundPosition = `${cols > 1 ? c / (cols - 1) * 100 : 0}% ${rows > 1 ? r / (rows - 1) * 100 : 0}%`;
+    for (let tries = 0; tries < 30; tries++) {
+      pz.x = rand(0, 1 - w); pz.y = rand(0, 1 - h);
+      if (Math.hypot(pz.x - pz.tx, pz.y - pz.ty) > 0.6 * Math.min(w, h)) break;
+    }
+    placePiece(pz); dragPiece(pz);
+    layer.append(pc); game.pieces.push(pz);
+  }
+}
+function placePiece(pz) { pz.el.style.left = pz.x * 100 + '%'; pz.el.style.top = pz.y * 100 + '%'; }
+function dragPiece(pz) {
+  let grab = null;
+  const at = e => { const r = board.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; };
+  pz.el.addEventListener('pointerdown', e => {
+    if (pz.placed || grab) return;
+    e.preventDefault(); e.stopPropagation();
+    pz.el.setPointerCapture(e.pointerId);
+    const p = at(e); grab = { id: e.pointerId, dx: p.x - pz.x, dy: p.y - pz.y };
+    pz.el.style.zIndex = ++game.z; pz.el.classList.add('lift'); pop(500);
+  });
+  pz.el.addEventListener('pointermove', e => {
+    if (!grab || e.pointerId !== grab.id) return;
+    e.stopPropagation();
+    const p = at(e);
+    pz.x = clamp(p.x - grab.dx, -pz.w * 0.4, 1 - pz.w * 0.6); pz.y = clamp(p.y - grab.dy, -pz.h * 0.4, 1 - pz.h * 0.6);
+    placePiece(pz);
+  });
+  const drop = e => {
+    if (!grab || e.pointerId !== grab.id) return;
+    grab = null; pz.el.classList.remove('lift');
+    if (Math.hypot(pz.x - pz.tx, pz.y - pz.ty) < 0.35 * Math.min(pz.w, pz.h)) {
+      pz.x = pz.tx; pz.y = pz.ty; pz.placed = true; placePiece(pz);
+      pz.el.classList.add('placed'); pz.el.style.zIndex = 1; pop(880);
+      if (game.pieces.every(q => q.placed)) setTimeout(finishPuzzle, 350);
+    }
+  };
+  ['pointerup', 'pointercancel'].forEach(t => pz.el.addEventListener(t, drop));
+}
+function finishPuzzle() {
+  if (game.kind !== 'puzzle') return;
+  paint.style.opacity = 1; lines.style.opacity = 1;
+  $('#puzzle').innerHTML = '';
+  celebrate();
+}
+
+// ----- mirror painting -----
+function drawMirrorGuide() {
+  fctx.clearRect(0, 0, SIZE, SIZE);
+  fctx.save(); fctx.strokeStyle = 'rgba(124,77,255,.35)'; fctx.lineWidth = 6; fctx.setLineDash([24, 22]);
+  fctx.beginPath(); fctx.moveTo(SIZE / 2, 0); fctx.lineTo(SIZE / 2, SIZE); fctx.stroke(); fctx.restore();
+}
+
+// ----- stickers (in every mode except puzzle): tap one to put it on, drag to move,
+// tap it to change its size, drag it off the picture to take it away -----
+const stickerLayer = $('#stickers');
+function buildStickerTray() {
+  const grid = $('#trayGrid');
+  for (const e of STICKERS) {
+    const b = el('button', 'traysticker', e); b.setAttribute('aria-label', 'sticker');
+    b.onclick = ev => {
+      ev.stopPropagation();
+      state.stickers.push({ e, x: Math.round(rand(350, 650)), y: Math.round(rand(350, 650)), s: STICKER_SIZES[1] });
+      renderStickers(); saveStickers(); pop(880);
+      $('#stickerTray').classList.remove('show');
+    };
+    grid.append(b);
+  }
+  $('#stickerBtn').onclick = () => { $('#stickerTray').classList.add('show'); pop(700); };
+  $('#stickerTray').onclick = () => $('#stickerTray').classList.remove('show');
+}
+function renderStickers() {
+  stickerLayer.innerHTML = '';
+  for (const st of state.stickers) {
+    const d = el('div', 'sticker', st.e);
+    st.el = d; moveSticker(st); dragSticker(st);
+    stickerLayer.append(d);
+  }
+}
+function sizeStickers() { for (const st of state.stickers) if (st.el) moveSticker(st); }
+function moveSticker(st) {
+  const k = (board.clientWidth || 600) / 1000;
+  st.el.style.left = st.x / 10 + '%'; st.el.style.top = st.y / 10 + '%';
+  st.el.style.fontSize = Math.round(st.s * k) + 'px';
+}
+function saveStickers() {
+  if (!state.pic) return;
+  db.put('paint', `${saveKey(state.pic.id)}:stickers`, JSON.stringify(state.stickers.map(({ e, x, y, s }) => ({ e, x, y, s }))));
+  if (!game.kind) scheduleSave();   // refresh the thumbnail
+}
+function dragSticker(st) {
+  let grab = null;
+  const at = e => { const r = board.getBoundingClientRect(); return { x: (e.clientX - r.left) * 1000 / r.width, y: (e.clientY - r.top) * 1000 / r.height }; };
+  st.el.addEventListener('pointerdown', e => {
+    if (grab || !state.stickers.includes(st)) return;
+    e.preventDefault(); e.stopPropagation();
+    st.el.setPointerCapture(e.pointerId);
+    const p = at(e); grab = { id: e.pointerId, dx: p.x - st.x, dy: p.y - st.y, sx: e.clientX, sy: e.clientY, moved: false };
+    stickerLayer.append(st.el); st.el.classList.add('lift');
+    state.stickers.splice(state.stickers.indexOf(st), 1); state.stickers.push(st);   // bring to front
+  });
+  st.el.addEventListener('pointermove', e => {
+    if (!grab || e.pointerId !== grab.id) return;
+    e.stopPropagation();
+    if (Math.hypot(e.clientX - grab.sx, e.clientY - grab.sy) > 8) grab.moved = true;
+    if (!grab.moved) return;
+    const p = at(e); st.x = Math.round(p.x - grab.dx); st.y = Math.round(p.y - grab.dy); moveSticker(st);
+  });
+  const drop = e => {
+    if (!grab || e.pointerId !== grab.id) return;
+    e.stopPropagation();
+    const moved = grab.moved; grab = null; st.el.classList.remove('lift');
+    if (!moved) {
+      st.s = STICKER_SIZES[(STICKER_SIZES.indexOf(st.s) + 1) % STICKER_SIZES.length] || STICKER_SIZES[1];
+      moveSticker(st); pop(620);
+    } else if (st.x < 0 || st.y < 0 || st.x > 1000 || st.y > 1000) {
+      state.stickers.splice(state.stickers.indexOf(st), 1);
+      st.el.classList.add('gone'); setTimeout(() => st.el.remove(), 300); pop(300);
+    }
+    saveStickers();
+  };
+  ['pointerup', 'pointercancel'].forEach(t => st.el.addEventListener(t, drop));
 }
 
 // ----- confetti -----

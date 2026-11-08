@@ -2,7 +2,9 @@
 
 An ad-free coloring app for kids 3 to 7, made for family and friends. It runs in Safari on iPad and iPhone and works offline once added to the home screen.
 
-- Three modes: free coloring, color by number, and connect the dots
+- Six modes: free coloring, color by number (color each space in with a brush), connect the dots,
+  scratch and reveal, mirror painting (blank pages), and puzzle (4, 6 or 9 pieces; uses the child's own coloring when there is one)
+- Stickers in every mode except puzzle: tap to add, drag to move, tap to change size, drag off the picture to remove
 - Tap-to-fill, marker, crayon, paintbrush, glitter and eraser
 - Brushes stay inside the lines by default (toggle with the brick button)
 - Pictures save automatically on the device

@@ -34,6 +34,7 @@
     <button class="round yellow" id="backBtn" aria-label="Back">⬅</button>
     <button class="round" id="undoBtn" aria-label="Undo">↩️</button>
     <button class="round" id="linesBtn" aria-label="Stay in the lines">🧱</button>
+    <button class="round pink" id="stickerBtn" aria-label="Stickers">🌟</button>
     <button class="round hold" id="saveBtn" aria-label="Save picture (hold)">📷<span class="ring"></span></button>
     <button class="round purple" id="trashBtn" aria-label="Start over">🗑️</button>
   </div>
@@ -41,10 +42,14 @@
     <div id="board">
       <canvas id="paint"></canvas>
       <canvas id="lines"></canvas>
+      <canvas id="cover"></canvas>
       <canvas id="fx"></canvas>
+      <div id="puzzle"></div>
+      <div id="stickers"></div>
     </div>
   </div>
   <div class="bar tools" id="tools"></div>
+  <div class="bar pieces" id="pieces" hidden></div>
   <div class="bar colors" id="colors"></div>
 </section>
 
@@ -56,6 +61,10 @@
       <button class="big yes" id="confirmYes" aria-label="Yes">✔</button>
     </div>
   </div>
+</div>
+
+ <div id="stickerTray" class="overlay">
+  <div class="dialog tray"><div id="trayGrid"></div></div>
 </div>
 
 <script type="module" src="app.js"></script>
